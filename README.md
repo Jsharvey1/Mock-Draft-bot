@@ -17,6 +17,10 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 | `/assign team user` | Commish | Makes a user the GM of a team (repeat for users with several teams) |
 | `/undo` | Commish | Clears the most recent pick |
 
+Set `PICKS_CHANNEL_ID` to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.
+
+Each pick is posted as one line, `72. <emoji> New Orleans Saints - P.J. Williams | OT | SMU`, followed by a separate message pinging whoever is up next. The emoji is a server emoji named after the team: its nickname (`saints`), full name (`neworleanssaints`) or abbreviation (`no`). If the server has none, the line has no emoji.
+
 "Commish" = anyone with Manage Server permission or the `Commish` role. They can also pick for an absent GM and accept trades for a team.
 
 ## Sheet layout

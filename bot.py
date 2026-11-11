@@ -11,12 +11,27 @@ from sheets import DraftSheet, Pick, open_spreadsheet
 
 ADMIN_ROLE = os.environ.get("ADMIN_ROLE", "Commish")
 GUILD_ID = os.environ.get("GUILD_ID")  # optional: makes slash commands appear instantly
+PICKS_CHANNEL_ID = os.environ.get("PICKS_CHANNEL_ID", "").strip()  # optional: where picks/pings are posted
 
 client = discord.Client(intents=discord.Intents.default(),
                         allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
 tree = app_commands.CommandTree(client)
 lock = asyncio.Lock()          # one sheet-changing action at a time
 sheet: DraftSheet | None = None
+
+
+async def picks_channel(fallback):
+    """The draft channel if PICKS_CHANNEL_ID is set, otherwise the channel the command came from."""
+    if PICKS_CHANNEL_ID.isdigit():
+        cid = int(PICKS_CHANNEL_ID)
+        return client.get_channel(cid) or await client.fetch_channel(cid)
+    return fallback
+
+
+async def announce(interaction: discord.Interaction, text: str):
+    channel = await picks_channel(interaction.channel)
+    await channel.send(text)
+    return channel
 
 
 async def run(fn, *args, **kwargs):
@@ -44,6 +59,40 @@ def clock_line(picks: list[Pick], gms: dict[str, int]) -> str:
     if nxt:
         line += f"\nOn deck: Pick {nxt.number} — {nxt.team}"
     return line
+
+
+NFL_ABBR = {
+    "arizona cardinals": "ari", "atlanta falcons": "atl", "baltimore ravens": "bal", "buffalo bills": "buf",
+    "carolina panthers": "car", "chicago bears": "chi", "cincinnati bengals": "cin", "cleveland browns": "cle",
+    "dallas cowboys": "dal", "denver broncos": "den", "detroit lions": "det", "green bay packers": "gb",
+    "houston texans": "hou", "indianapolis colts": "ind", "jacksonville jaguars": "jax",
+    "kansas city chiefs": "kc", "las vegas raiders": "lv", "los angeles chargers": "lac",
+    "los angeles rams": "lar", "miami dolphins": "mia", "minnesota vikings": "min",
+    "new england patriots": "ne", "new orleans saints": "no", "new york giants": "nyg", "new york jets": "nyj",
+    "philadelphia eagles": "phi", "pittsburgh steelers": "pit", "san francisco 49ers": "sf",
+    "seattle seahawks": "sea", "tampa bay buccaneers": "tb", "tennessee titans": "ten",
+    "washington commanders": "was",
+}
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def team_emoji(guild, team: str) -> str:
+    """A server emoji named after the team: full name, nickname (e.g. 'vikings') or abbreviation ('min')."""
+    if guild is None:
+        return ""
+    words = team.split()
+    names = {_norm(team), _norm(words[-1]) if words else ""}
+    abbr = NFL_ABBR.get(" ".join(words).lower())
+    if abbr:
+        names |= {abbr, "nfl" + abbr, abbr + "logo"}
+    names.discard("")
+    for e in guild.emojis:
+        if _norm(e.name) in names:
+            return str(e)
+    return ""
 
 
 def parse_pick_numbers(text: str | None) -> list[int]:
@@ -85,12 +134,12 @@ async def pick(interaction: discord.Interaction, player: str, position: str, sch
                 f"**{dupe.player}** already went at pick {dupe.number} to {dupe.team}.")
         await run(sheet.record_pick, cur, player.strip(), position.strip().upper(), school.strip())
         picks = await run(sheet.picks)
-    detail = ", ".join(x for x in (position.strip().upper(), school.strip()) if x)
-    by = "" if interaction.user.id == gm else f" *(entered by {interaction.user.display_name})*"
-    await interaction.channel.send(
-        f"✅ **Pick {cur.number}** — **{cur.team}** select **{player.strip()}** ({detail}){by}\n\n"
-        + clock_line(picks, gms))
-    await interaction.followup.send("Pick recorded.")
+    parts = [player.strip(), position.strip().upper(), school.strip()]
+    emoji = team_emoji(interaction.guild, cur.team)
+    line = f"{cur.number}. {emoji + ' ' if emoji else ''}{cur.team} - " + " | ".join(x for x in parts if x)
+    channel = await announce(interaction, line)
+    await channel.send(clock_line(picks, gms))
+    await interaction.followup.send(f"Pick recorded and posted in {channel.mention}.")
 
 
 @tree.command(description="[Commish] Undo the most recent pick")
@@ -106,16 +155,23 @@ async def undo(interaction: discord.Interaction):
         last = made[-1]
         await run(sheet.clear_pick, last)
         picks = await run(sheet.picks)
-    await interaction.channel.send(
+    await announce(
+        interaction,
         f"↩️ Pick {last.number} ({last.team}: {last.player}) was undone.\n\n" + clock_line(picks, gms))
     await interaction.followup.send("Done.")
 
 
 @tree.command(description="Show who's on the clock (and ping them)")
 async def onclock(interaction: discord.Interaction):
-    await interaction.response.defer()
+    picks_ch = await picks_channel(interaction.channel)
+    here = picks_ch.id == interaction.channel_id
+    await interaction.response.defer(ephemeral=not here)
     picks, gms = await run(sheet.picks), await run(sheet.gms)
-    await interaction.followup.send(clock_line(picks, gms))
+    if here:
+        await interaction.followup.send(clock_line(picks, gms))
+    else:
+        await picks_ch.send(clock_line(picks, gms))
+        await interaction.followup.send(f"Posted in {picks_ch.mention}.")
 
 
 @tree.command(description="Show the next 10 picks")
@@ -217,6 +273,9 @@ class TradeView(discord.ui.View):
         if before and after and before.team != after.team:   # the pick on the clock changed hands
             text += "\n\n" + clock_line(picks, gms)
         await self._finish(interaction, text)
+        picks_ch = await picks_channel(interaction.channel)
+        if picks_ch.id != interaction.channel_id:
+            await picks_ch.send(text)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, _):
