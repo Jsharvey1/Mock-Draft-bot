@@ -9,13 +9,13 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 | Command | Who | What it does |
 |---|---|---|
 | `/pick player position [school]` | GM on the clock | Fills in the pick, announces it, pings the next GM |
-| `/trade your_team other_team [you_send] [you_get] [you_send_other] [you_get_other]` | Any GM | Posts a proposal with Accept/Decline buttons. On accept, the picks change teams in the sheet and the picks channel gets: `The Cleveland Browns send pick 18 and a 2027 4th to the New York Giants for picks 22 and 86.` Players and future picks go in the `_other` fields (e.g. `OT Joe Alt, 2028 5th`); they're announced and logged but not tracked |
+| `/trade your_team other_team [you_send] [you_get] [you_send_other] [you_get_other]` | Any GM | Posts a proposal with Accept/Decline buttons. On accept, the picks change teams in the sheet and the trades channel gets: `The Cleveland Browns send pick 18 and a 2027 4th to the New York Giants for picks 22 and 86.` Players and future picks go in the `_other` fields (e.g. `OT Joe Alt, 2028 5th`); they're announced and logged but not tracked |
 | `/onclock` | Anyone | Re-pings the GM on the clock in the ping channel |
 | `/upcoming` | Anyone | Next 10 picks |
 | `/teampicks team` | Anyone | All picks a team holds or has made |
 | `/gms` | Anyone | Teams and their GMs |
 | `/assign team user` | Commish | Makes a user the GM of a team (repeat for users with several teams) |
-| `/setchannels [picks] [pings]` | Commish | Chooses the picks channel and the ping channel (run with no options to see the current ones) |
+| `/setchannels [picks] [pings] [trades]` | Commish | Chooses the picks, ping and trade-announcement channels (trades default to the picks channel) (run with no options to see the current ones) |
 | `/undo` | Commish | Clears the most recent pick |
 
 Run `/setchannels picks:#picks pings:#the-board` once per draft to choose the channels; the choice is saved in the sheet's `Settings` tab. (`PICKS_CHANNEL_ID` / `CLOCK_CHANNEL_ID` in Railway still work as a fallback.) Set a picks channel to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.

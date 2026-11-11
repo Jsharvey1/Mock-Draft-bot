@@ -14,6 +14,7 @@ ADMIN_ROLE = os.environ.get("ADMIN_ROLE", "Commish")
 GUILD_ID = os.environ.get("GUILD_ID")  # optional: makes slash commands appear instantly
 PICKS_CHANNEL_ID = os.environ.get("PICKS_CHANNEL_ID", "").strip()  # optional: where picks are posted
 CLOCK_CHANNEL_ID = os.environ.get("CLOCK_CHANNEL_ID", "").strip()  # optional: where "you're up" pings go
+TRADES_CHANNEL_ID = os.environ.get("TRADES_CHANNEL_ID", "").strip()  # optional: where accepted trades go
 
 client = discord.Client(intents=discord.Intents.default(),
                         allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
@@ -35,6 +36,11 @@ settings: dict[str, str] = {}   # from the sheet's Settings tab; set with /setch
 async def picks_channel(fallback):
     """The picks channel from /setchannels (or PICKS_CHANNEL_ID), otherwise where the command was used."""
     return await _channel(settings.get("picks_channel") or PICKS_CHANNEL_ID, fallback)
+
+
+async def trades_channel(fallback):
+    """The trades channel if set, otherwise the picks channel."""
+    return await _channel(settings.get("trades_channel") or TRADES_CHANNEL_ID, await picks_channel(fallback))
 
 
 async def clock_channel(fallback):
@@ -274,15 +280,17 @@ async def teampicks(interaction: discord.Interaction, team: str):
 
 # ------------------------------------------------------------------ setup
 @tree.command(description="[Commish] Choose where picks are posted and where the next GM is pinged")
-@app_commands.describe(picks="Channel for pick announcements and trades",
-                       pings="Channel for the @mention of whoever is on the clock")
-async def setchannels(interaction: discord.Interaction,
-                      picks: discord.TextChannel | None = None, pings: discord.TextChannel | None = None):
+@app_commands.describe(picks="Channel for pick announcements",
+                       pings="Channel for the @mention of whoever is on the clock",
+                       trades="Channel for accepted trade announcements (default: the picks channel)")
+async def setchannels(interaction: discord.Interaction, picks: discord.TextChannel | None = None,
+                      pings: discord.TextChannel | None = None, trades: discord.TextChannel | None = None):
     if not is_admin(interaction.user):
         return await interaction.response.send_message("Only the commish can set channels.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
     lines, warn = [], []
-    for key, channel, label in (("picks_channel", picks, "Picks"), ("clock_channel", pings, "Pings")):
+    for key, channel, label in (("picks_channel", picks, "Picks"), ("clock_channel", pings, "Pings"),
+                                ("trades_channel", trades, "Trades")):
         if channel is None:
             continue
         perms = channel.permissions_for(interaction.guild.me)
@@ -294,7 +302,8 @@ async def setchannels(interaction: discord.Interaction,
         lines.append(f"{label}: {channel.mention}")
     if not lines:
         current = [f"{label}: " + (f"<#{settings[k]}>" if settings.get(k) else "not set")
-                   for k, label in (("picks_channel", "Picks"), ("clock_channel", "Pings"))]
+                   for k, label in (("picks_channel", "Picks"), ("clock_channel", "Pings"),
+                                    ("trades_channel", "Trades"))]
         return await interaction.followup.send("\n".join(current))
     await interaction.followup.send("\n".join(lines + warn))
 
@@ -421,10 +430,10 @@ class TradeView(discord.ui.View):
         text = trade_announcement(interaction.guild, self.team_a, self.team_b,
                                   self.nums_a, self.nums_b, self.extra_a, self.extra_b)
         after = current_pick(picks)
-        picks_ch = await picks_channel(interaction.channel)
-        if picks_ch.id != interaction.channel_id:
+        trades_ch = await trades_channel(interaction.channel)
+        if trades_ch.id != interaction.channel_id:
             await self._finish(interaction, "✅ Trade accepted — " + text.removeprefix("🔁 "))
-            await picks_ch.send(text)
+            await trades_ch.send(text)
         else:
             await self._finish(interaction, text)
         if before and after and before.team != after.team:   # the pick on the clock changed hands
