@@ -42,17 +42,19 @@ async def clock_channel(fallback):
     return await _channel(settings.get("clock_channel") or CLOCK_CHANNEL_ID, await picks_channel(fallback))
 
 
-def clock_ping(picks: list[Pick], gms: dict[str, int]) -> str | None:
-    """Just a mention of whoever is up, e.g. '@Kebo'. None when the draft is over."""
+def clock_ping(picks: list[Pick], gms: dict[str, int], guild=None) -> str | None:
+    """e.g. '@Kebo — Pick 3: <emoji> Chicago Bears'. None when the draft is over."""
     p = current_pick(picks)
     if p is None:
         return None
     uid = sheet.gm_of(p.team, gms)
-    return f"<@{uid}>" if uid else f"{p.team} (no GM assigned)"
+    who = f"<@{uid}>" if uid else "*(no GM assigned)*"
+    emoji = team_emoji(guild, p.team)
+    return f"{who} — Pick {p.number}: {emoji + ' ' if emoji else ''}{p.team}"
 
 
 async def ping_next(fallback, picks, gms):
-    text = clock_ping(picks, gms)
+    text = clock_ping(picks, gms, getattr(fallback, "guild", None))
     if text:
         channel = await clock_channel(fallback)
         await channel.send(text)

@@ -20,7 +20,7 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 
 Run `/setchannels picks:#picks pings:#the-board` once per draft to choose the channels; the choice is saved in the sheet's `Settings` tab. (`PICKS_CHANNEL_ID` / `CLOCK_CHANNEL_ID` in Railway still work as a fallback.) Set a picks channel to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.
 
-Each pick is posted as one line, `72. <emoji> New Orleans Saints - P.J. Williams | OT | SMU`, followed by a ping for whoever is up next. The ping is just their @mention, posted in the channel set by `CLOCK_CHANNEL_ID` (falls back to the picks channel). `/onclock` re-sends the ping and shows you the full pick details privately. The emoji is a server emoji named after the team: its nickname (`saints`), full name (`neworleanssaints`) or abbreviation (`no`). If the server has none, the line has no emoji.
+Each pick is posted as one line, `72. <emoji> New Orleans Saints - P.J. Williams | OT | SMU`, followed by a ping for whoever is up next. The ping reads `@kebo — Pick 3: Chicago Bears`, posted in the channel set by `CLOCK_CHANNEL_ID` (falls back to the picks channel). `/onclock` re-sends the ping and shows you the full pick details privately. The emoji is a server emoji named after the team: its nickname (`saints`), full name (`neworleanssaints`) or abbreviation (`no`). If the server has none, the line has no emoji.
 
 "Commish" = anyone with Manage Server permission or the `Commish` role. They can also pick for an absent GM and accept trades for a team.
 
