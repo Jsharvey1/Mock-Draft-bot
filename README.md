@@ -10,7 +10,7 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 |---|---|---|
 | `/pick player position [school]` | GM on the clock | Fills in the pick, announces it, pings the next GM |
 | `/trade your_team other_team [you_send] [you_get] [other]` | Any GM | Posts a proposal with Accept/Decline buttons; on accept, the picks change teams in the sheet |
-| `/onclock` | Anyone | Re-pings the GM on the clock |
+| `/onclock` | Anyone | Re-pings the GM on the clock in the ping channel |
 | `/upcoming` | Anyone | Next 10 picks |
 | `/teampicks team` | Anyone | All picks a team holds or has made |
 | `/gms` | Anyone | Teams and their GMs |
@@ -19,7 +19,7 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 
 Set `PICKS_CHANNEL_ID` to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.
 
-Each pick is posted as one line, `72. <emoji> New Orleans Saints - P.J. Williams | OT | SMU`, followed by a separate message pinging whoever is up next. The emoji is a server emoji named after the team: its nickname (`saints`), full name (`neworleanssaints`) or abbreviation (`no`). If the server has none, the line has no emoji.
+Each pick is posted as one line, `72. <emoji> New Orleans Saints - P.J. Williams | OT | SMU`, followed by a ping for whoever is up next. The ping is just their @mention, posted in the channel set by `CLOCK_CHANNEL_ID` (falls back to the picks channel). `/onclock` re-sends the ping and shows you the full pick details privately. The emoji is a server emoji named after the team: its nickname (`saints`), full name (`neworleanssaints`) or abbreviation (`no`). If the server has none, the line has no emoji.
 
 "Commish" = anyone with Manage Server permission or the `Commish` role. They can also pick for an absent GM and accept trades for a team.
 

@@ -11,7 +11,8 @@ from sheets import DraftSheet, Pick, open_spreadsheet
 
 ADMIN_ROLE = os.environ.get("ADMIN_ROLE", "Commish")
 GUILD_ID = os.environ.get("GUILD_ID")  # optional: makes slash commands appear instantly
-PICKS_CHANNEL_ID = os.environ.get("PICKS_CHANNEL_ID", "").strip()  # optional: where picks/pings are posted
+PICKS_CHANNEL_ID = os.environ.get("PICKS_CHANNEL_ID", "").strip()  # optional: where picks are posted
+CLOCK_CHANNEL_ID = os.environ.get("CLOCK_CHANNEL_ID", "").strip()  # optional: where "you're up" pings go
 
 client = discord.Client(intents=discord.Intents.default(),
                         allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
@@ -20,12 +21,38 @@ lock = asyncio.Lock()          # one sheet-changing action at a time
 sheet: DraftSheet | None = None
 
 
-async def picks_channel(fallback):
-    """The draft channel if PICKS_CHANNEL_ID is set, otherwise the channel the command came from."""
-    if PICKS_CHANNEL_ID.isdigit():
-        cid = int(PICKS_CHANNEL_ID)
+async def _channel(setting: str, fallback):
+    if setting.isdigit():
+        cid = int(setting)
         return client.get_channel(cid) or await client.fetch_channel(cid)
     return fallback
+
+
+async def picks_channel(fallback):
+    """The draft channel if PICKS_CHANNEL_ID is set, otherwise the channel the command came from."""
+    return await _channel(PICKS_CHANNEL_ID, fallback)
+
+
+async def clock_channel(fallback):
+    """The ping channel if CLOCK_CHANNEL_ID is set, otherwise the picks channel."""
+    return await _channel(CLOCK_CHANNEL_ID, await picks_channel(fallback))
+
+
+def clock_ping(picks: list[Pick], gms: dict[str, int]) -> str | None:
+    """Just a mention of whoever is up, e.g. '@Kebo'. None when the draft is over."""
+    p = current_pick(picks)
+    if p is None:
+        return None
+    uid = sheet.gm_of(p.team, gms)
+    return f"<@{uid}>" if uid else f"{p.team} (no GM assigned)"
+
+
+async def ping_next(fallback, picks, gms):
+    text = clock_ping(picks, gms)
+    if text:
+        channel = await clock_channel(fallback)
+        await channel.send(text)
+        return channel
 
 
 async def announce(interaction: discord.Interaction, text: str):
@@ -138,7 +165,10 @@ async def pick(interaction: discord.Interaction, player: str, position: str, sch
     emoji = team_emoji(interaction.guild, cur.team)
     line = f"{cur.number}. {emoji + ' ' if emoji else ''}{cur.team} - " + " | ".join(x for x in parts if x)
     channel = await announce(interaction, line)
-    await channel.send(clock_line(picks, gms))
+    if current_pick(picks) is None:
+        await channel.send("🏁 **The draft is complete!**")
+    else:
+        await ping_next(interaction.channel, picks, gms)
     await interaction.followup.send(f"Pick recorded and posted in {channel.mention}.")
 
 
@@ -157,21 +187,19 @@ async def undo(interaction: discord.Interaction):
         picks = await run(sheet.picks)
     await announce(
         interaction,
-        f"↩️ Pick {last.number} ({last.team}: {last.player}) was undone.\n\n" + clock_line(picks, gms))
+        f"↩️ Pick {last.number} ({last.team}: {last.player}) was undone.")
+    await ping_next(interaction.channel, picks, gms)
     await interaction.followup.send("Done.")
 
 
 @tree.command(description="Show who's on the clock (and ping them)")
 async def onclock(interaction: discord.Interaction):
-    picks_ch = await picks_channel(interaction.channel)
-    here = picks_ch.id == interaction.channel_id
-    await interaction.response.defer(ephemeral=not here)
+    await interaction.response.defer(ephemeral=True)
     picks, gms = await run(sheet.picks), await run(sheet.gms)
-    if here:
-        await interaction.followup.send(clock_line(picks, gms))
-    else:
-        await picks_ch.send(clock_line(picks, gms))
-        await interaction.followup.send(f"Posted in {picks_ch.mention}.")
+    await interaction.followup.send(clock_line(picks, gms))   # full details, only visible to you
+    channel = await ping_next(interaction.channel, picks, gms)
+    if channel and channel.id != interaction.channel_id:
+        await interaction.followup.send(f"Pinged in {channel.mention}.", ephemeral=True)
 
 
 @tree.command(description="Show the next 10 picks")
@@ -270,12 +298,12 @@ class TradeView(discord.ui.View):
             picks = await run(sheet.picks)
         text = "🔁 **TRADE**\n" + trade_summary(self.team_a, self.team_b, self.nums_a, self.nums_b, self.other)
         after = current_pick(picks)
-        if before and after and before.team != after.team:   # the pick on the clock changed hands
-            text += "\n\n" + clock_line(picks, gms)
         await self._finish(interaction, text)
         picks_ch = await picks_channel(interaction.channel)
         if picks_ch.id != interaction.channel_id:
             await picks_ch.send(text)
+        if before and after and before.team != after.team:   # the pick on the clock changed hands
+            await ping_next(interaction.channel, picks, gms)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, _):
