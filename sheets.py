@@ -109,13 +109,17 @@ class DraftSheet:
             seen.setdefault(team.lower(), team)
         return sorted(seen.values())
 
-    def gms(self) -> dict[str, int]:
-        """team name -> Discord user id"""
+    def gm_entries(self) -> dict[str, str]:
+        """team name -> whatever is in column B: a Discord user ID or a username/nickname"""
         out = {}
         for row in self.gm_ws.get_all_values()[1:]:
-            if len(row) >= 2 and row[0].strip() and row[1].strip().isdigit():
-                out[row[0].strip()] = int(row[1].strip())
+            if len(row) >= 2 and row[0].strip() and row[1].strip():
+                out[row[0].strip()] = row[1].strip()
         return out
+
+    def gms(self) -> dict[str, int]:
+        """team name -> Discord user id (ID entries only; the bot resolves usernames)"""
+        return {t: int(v) for t, v in self.gm_entries().items() if v.isdigit()}
 
     def gm_of(self, team: str, gms: dict[str, int] | None = None) -> int | None:
         gms = self.gms() if gms is None else gms

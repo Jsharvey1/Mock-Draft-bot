@@ -3,6 +3,7 @@ to a Google Sheet, with a ping for whoever is on the clock."""
 import asyncio
 import os
 import re
+import time
 
 import discord
 from discord import app_commands
@@ -59,6 +60,52 @@ async def announce(interaction: discord.Interaction, text: str):
     channel = await picks_channel(interaction.channel)
     await channel.send(text)
     return channel
+
+
+_name_cache: dict[tuple[int, str], tuple[float, int | None]] = {}   # (guild, name) -> (time, user id)
+
+
+def _best_match(members, name: str) -> int | None:
+    """Exact username wins over an exact nickname/display name, so 'kebo' finds @kebo, not a 'Kebo' nickname."""
+    name = name.lower()
+    for fields in (lambda m: (m.name,), lambda m: (m.nick, m.global_name, m.display_name)):
+        for m in members:
+            if any(n and n.lower() == name for n in fields(m)):
+                return m.id
+    return None
+
+
+async def resolve_user(guild, name: str) -> int | None:
+    """Find a server member by exact username, display name or nickname (case-insensitive)."""
+    if guild is None:
+        return None
+    key = (guild.id, name.lower())
+    hit = _name_cache.get(key)
+    if hit and (hit[1] is not None or time.time() - hit[0] < 120):   # retry misses after 2 min
+        return hit[1]
+    uid = _best_match(guild.members, name)
+    if uid is None:
+        try:
+            found = await guild.query_members(query=name, limit=25, cache=True)
+            uid = _best_match(found, name)
+        except (asyncio.TimeoutError, discord.HTTPException):
+            return None
+    _name_cache[key] = (time.time(), uid)
+    return uid
+
+
+async def load_gms(guild, missing: list | None = None) -> dict[str, int]:
+    """team -> Discord user id, from the GMs tab. Column B may be an ID or a username."""
+    entries = await run(sheet.gm_entries)
+    names = {t: v.lstrip("@").strip() for t, v in entries.items() if not v.isdigit()}
+    ids = await asyncio.gather(*(resolve_user(guild, n) for n in names.values()))
+    out = {t: int(v) for t, v in entries.items() if v.isdigit()}
+    for (team, name), uid in zip(names.items(), ids):
+        if uid:
+            out[team] = uid
+        elif missing is not None:
+            missing.append((team, name))
+    return out
 
 
 async def run(fn, *args, **kwargs):
@@ -147,7 +194,7 @@ def match_team(name: str, picks: list[Pick], gms: dict[str, int]) -> str | None:
 async def pick(interaction: discord.Interaction, player: str, position: str, school: str = ""):
     await interaction.response.defer(ephemeral=True)
     async with lock:
-        picks, gms = await run(sheet.picks), await run(sheet.gms)
+        picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
         cur = current_pick(picks)
         if cur is None:
             return await interaction.followup.send("The draft is already complete.")
@@ -178,7 +225,7 @@ async def undo(interaction: discord.Interaction):
         return await interaction.response.send_message("Only the commish can undo picks.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
     async with lock:
-        picks, gms = await run(sheet.picks), await run(sheet.gms)
+        picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
         made = [p for p in picks if p.made]
         if not made:
             return await interaction.followup.send("No picks have been made yet.")
@@ -195,7 +242,7 @@ async def undo(interaction: discord.Interaction):
 @tree.command(description="Show who's on the clock (and ping them)")
 async def onclock(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    picks, gms = await run(sheet.picks), await run(sheet.gms)
+    picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
     await interaction.followup.send(clock_line(picks, gms))   # full details, only visible to you
     channel = await ping_next(interaction.channel, picks, gms)
     if channel and channel.id != interaction.channel_id:
@@ -228,7 +275,7 @@ async def assign(interaction: discord.Interaction, team: str, user: discord.Memb
         return await interaction.response.send_message("Only the commish can assign GMs.", ephemeral=True)
     await interaction.response.defer()
     async with lock:
-        picks, gms = await run(sheet.picks), await run(sheet.gms)
+        picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
         name = match_team(team, picks, gms)
         if not name:
             return await interaction.followup.send(f"No team called “{team}” in the draft sheet.")
@@ -239,10 +286,20 @@ async def assign(interaction: discord.Interaction, team: str, user: discord.Memb
 @tree.command(description="List teams and their GMs")
 async def gms(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    assigned = await run(sheet.gms)
-    lines = [f"{t}: " + (f"<@{sheet.gm_of(t, assigned)}>" if sheet.gm_of(t, assigned) else "—")
-             for t in await run(sheet.teams)]
-    await interaction.followup.send("\n".join(lines)[:1900] or "No teams found.")
+    missing = []
+    assigned = await load_gms(interaction.guild, missing)
+    unknown = {t.lower(): n for t, n in missing}
+    lines = []
+    for t in await run(sheet.teams):
+        uid = sheet.gm_of(t, assigned)
+        if uid:
+            lines.append(f"{t}: <@{uid}>")
+        elif t.lower() in unknown:
+            lines.append(f"{t}: ⚠️ can't find `{unknown[t.lower()]}` in this server")
+        else:
+            lines.append(f"{t}: —")
+    await interaction.followup.send("\n".join(lines)[:1900] or "No teams found.",
+                                    allowed_mentions=discord.AllowedMentions.none())
 
 
 # ------------------------------------------------------------------ trades
@@ -285,7 +342,7 @@ class TradeView(discord.ui.View):
     async def accept(self, interaction: discord.Interaction, _):
         await interaction.response.defer()
         async with lock:
-            picks, gms = await run(sheet.picks), await run(sheet.gms)
+            picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
             if interaction.user.id != sheet.gm_of(self.team_b, gms) and not is_admin(interaction.user):
                 return await interaction.followup.send(
                     f"Only the {self.team_b} GM or the commish can accept this.", ephemeral=True)
@@ -308,7 +365,7 @@ class TradeView(discord.ui.View):
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, _):
         await interaction.response.defer()
-        gms = await run(sheet.gms)
+        gms = await load_gms(interaction.guild)
         allowed = {sheet.gm_of(self.team_b, gms), self.proposer_id}
         if interaction.user.id not in allowed and not is_admin(interaction.user):
             return await interaction.followup.send("That's not your trade to decline.", ephemeral=True)
@@ -324,7 +381,7 @@ class TradeView(discord.ui.View):
 async def trade(interaction: discord.Interaction, your_team: str, other_team: str,
                 you_send: str = "", you_get: str = "", other: str = ""):
     await interaction.response.defer()
-    picks, gms = await run(sheet.picks), await run(sheet.gms)
+    picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
     team_a, team_b = match_team(your_team, picks, gms), match_team(other_team, picks, gms)
     nums_a, nums_b = parse_pick_numbers(you_send), parse_pick_numbers(you_get)
     try:

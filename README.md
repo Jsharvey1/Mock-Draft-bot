@@ -36,6 +36,7 @@ One tab (default name `Draft`) with one row per pick, in draft order:
 - Any number of teams or rounds works: the bot just follows the rows.
 - Different tab name or columns? Set `DRAFT_TAB`, `FIRST_PICK_ROW`, `COL_*` (see `.env.example`).
 - The bot adds two tabs: `GMs` (team → Discord user) and `Trades` (log).
+- You can fill the `GMs` tab by hand instead of using `/assign`: team name in column A (spelled as in the draft tab), and in column B either the person's Discord user ID or their Discord username/server nickname (`kebo`, `@kebo`). Exact usernames win over nicknames. `/gms` shows who each name resolved to and flags any it can't find.
 - Traded picks get the new team in column B and a note like `[from CAR via NYJ]` in column F.
 
 ## Setup
