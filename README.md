@@ -16,6 +16,7 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 | `/gms` | Anyone | Teams and their GMs |
 | `/assign team user` | Commish | Makes a user the GM of a team (repeat for users with several teams) |
 | `/setchannels [picks] [pings] [trades]` | Commish | Chooses the picks, ping and trade-announcement channels (trades default to the picks channel) (run with no options to see the current ones) |
+| `/logtrade team_a team_b [a_sends] [b_sends] [a_sends_other] [b_sends_other]` | Commish | Records an agreed trade straight away (no Accept step): moves the picks in the sheet, logs it, announces it in the trades channel and re-pings if the pick on the clock changed hands |
 | `/undo` | Commish | Clears the most recent pick |
 
 Run `/setchannels picks:#picks pings:#the-board` once per draft to choose the channels; the choice is saved in the sheet's `Settings` tab. (`PICKS_CHANNEL_ID` / `CLOCK_CHANNEL_ID` in Railway still work as a fallback.) Set a picks channel to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.

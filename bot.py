@@ -400,6 +400,25 @@ def trade_announcement(guild, team_a, team_b, nums_a, nums_b, extra_a="", extra_
     return f"🔁 The {a} acquire {get} from the {b}."
 
 
+async def execute_trade(interaction, picks, gms, pa, pb, team_a, team_b, nums_a, nums_b, extra_a, extra_b):
+    """Write the trade to the sheet, announce it, and re-ping if the pick on the clock moved.
+    Call while holding `lock`, after validate_trade. Returns (text, trades channel, re-pinged?)."""
+    before = current_pick(picks)
+    other = "; ".join(x for x in (f"{team_a} send: {extra_a}" if extra_a else "",
+                                 f"{team_b} send: {extra_b}" if extra_b else "") if x)
+    await run(sheet.apply_trade, team_a, team_b, pa, pb, other)
+    picks = await run(sheet.picks)
+    text = trade_announcement(interaction.guild, team_a, team_b, nums_a, nums_b, extra_a, extra_b)
+    trades_ch = await trades_channel(interaction.channel)
+    if trades_ch.id != interaction.channel_id:
+        await trades_ch.send(text)
+    after = current_pick(picks)
+    moved = bool(before and after and before.team != after.team)
+    if moved:
+        await ping_next(interaction.channel, picks, gms)
+    return text, trades_ch, moved
+
+
 class TradeView(discord.ui.View):
     def __init__(self, proposer_id, team_a, team_b, nums_a, nums_b, extra_a, extra_b):
         super().__init__(timeout=24 * 3600)
@@ -422,22 +441,13 @@ class TradeView(discord.ui.View):
                 pa, pb = validate_trade(picks, self.team_a, self.team_b, self.nums_a, self.nums_b)
             except ValueError as e:
                 return await self._finish(interaction, f"❌ Trade void — {e}")
-            before = current_pick(picks)
-            other = "; ".join(x for x in (f"{self.team_a} send: {self.extra_a}" if self.extra_a else "",
-                                         f"{self.team_b} send: {self.extra_b}" if self.extra_b else "") if x)
-            await run(sheet.apply_trade, self.team_a, self.team_b, pa, pb, other)
-            picks = await run(sheet.picks)
-        text = trade_announcement(interaction.guild, self.team_a, self.team_b,
-                                  self.nums_a, self.nums_b, self.extra_a, self.extra_b)
-        after = current_pick(picks)
-        trades_ch = await trades_channel(interaction.channel)
+            text, trades_ch, repinged = await execute_trade(
+                interaction, picks, gms, pa, pb, self.team_a, self.team_b,
+                self.nums_a, self.nums_b, self.extra_a, self.extra_b)
         if trades_ch.id != interaction.channel_id:
             await self._finish(interaction, "✅ Trade accepted — " + text.removeprefix("🔁 "))
-            await trades_ch.send(text)
         else:
             await self._finish(interaction, text)
-        if before and after and before.team != after.team:   # the pick on the clock changed hands
-            await ping_next(interaction.channel, picks, gms)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, _):
@@ -479,6 +489,38 @@ async def trade(interaction: discord.Interaction, your_team: str, other_team: st
     await interaction.followup.send(
         f"📨 **Trade proposal** — {ping}, accept?\n" + trade_summary(team_a, team_b, nums_a, nums_b, extra_a, extra_b),
         view=TradeView(interaction.user.id, team_a, team_b, nums_a, nums_b, extra_a, extra_b))
+
+
+@tree.command(description="[Commish] Record a trade that's already agreed — updates the sheet right away, no Accept needed")
+@app_commands.describe(
+    team_a="First team", team_b="Second team",
+    a_sends="Pick numbers team A gives up, e.g. 18, 86", b_sends="Pick numbers team B gives up, e.g. 22",
+    a_sends_other="Players/future picks team A gives up, e.g. OT Joe Alt", b_sends_other="Players/future picks team B gives up")
+@app_commands.autocomplete(team_a=team_autocomplete, team_b=team_autocomplete)
+async def logtrade(interaction: discord.Interaction, team_a: str, team_b: str, a_sends: str = "", b_sends: str = "",
+                   a_sends_other: str = "", b_sends_other: str = ""):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Only the commish can record trades directly.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    async with lock:
+        picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
+        ta, tb = match_team(team_a, picks, gms), match_team(team_b, picks, gms)
+        nums_a, nums_b = parse_pick_numbers(a_sends), parse_pick_numbers(b_sends)
+        extra_a, extra_b = a_sends_other.strip(), b_sends_other.strip()
+        try:
+            if not ta or not tb or ta == tb:
+                raise ValueError("Pick two different teams from the list.")
+            if not (nums_a or nums_b or extra_a or extra_b):
+                raise ValueError("Nothing is being traded.")
+            pa, pb = validate_trade(picks, ta, tb, nums_a, nums_b)
+        except ValueError as e:
+            return await interaction.followup.send(f"❌ {e}")
+        text, trades_ch, _ = await execute_trade(interaction, picks, gms, pa, pb, ta, tb,
+                                                 nums_a, nums_b, extra_a, extra_b)
+    if trades_ch.id == interaction.channel_id:
+        await interaction.followup.send("Recorded.")
+    else:
+        await interaction.followup.send(f"Recorded and posted in {trades_ch.mention}.")
 
 
 # ------------------------------------------------------------------ startup
