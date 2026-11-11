@@ -29,14 +29,17 @@ async def _channel(setting: str, fallback):
     return fallback
 
 
+settings: dict[str, str] = {}   # from the sheet's Settings tab; set with /setchannels
+
+
 async def picks_channel(fallback):
-    """The draft channel if PICKS_CHANNEL_ID is set, otherwise the channel the command came from."""
-    return await _channel(PICKS_CHANNEL_ID, fallback)
+    """The picks channel from /setchannels (or PICKS_CHANNEL_ID), otherwise where the command was used."""
+    return await _channel(settings.get("picks_channel") or PICKS_CHANNEL_ID, fallback)
 
 
 async def clock_channel(fallback):
     """The ping channel if CLOCK_CHANNEL_ID is set, otherwise the picks channel."""
-    return await _channel(CLOCK_CHANNEL_ID, await picks_channel(fallback))
+    return await _channel(settings.get("clock_channel") or CLOCK_CHANNEL_ID, await picks_channel(fallback))
 
 
 def clock_ping(picks: list[Pick], gms: dict[str, int]) -> str | None:
@@ -267,6 +270,33 @@ async def teampicks(interaction: discord.Interaction, team: str):
     await interaction.followup.send("\n".join(lines)[:1900] or f"No picks found for “{team}”.")
 
 
+# ------------------------------------------------------------------ setup
+@tree.command(description="[Commish] Choose where picks are posted and where the next GM is pinged")
+@app_commands.describe(picks="Channel for pick announcements and trades",
+                       pings="Channel for the @mention of whoever is on the clock")
+async def setchannels(interaction: discord.Interaction,
+                      picks: discord.TextChannel | None = None, pings: discord.TextChannel | None = None):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Only the commish can set channels.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    lines, warn = [], []
+    for key, channel, label in (("picks_channel", picks, "Picks"), ("clock_channel", pings, "Pings")):
+        if channel is None:
+            continue
+        perms = channel.permissions_for(interaction.guild.me)
+        if not (perms.view_channel and perms.send_messages):
+            warn.append(f"⚠️ I can't post in {channel.mention} yet. Give my role **View Channel** and "
+                        f"**Send Messages** there.")
+        await run(sheet.set_setting, key, str(channel.id))
+        settings[key] = str(channel.id)
+        lines.append(f"{label}: {channel.mention}")
+    if not lines:
+        current = [f"{label}: " + (f"<#{settings[k]}>" if settings.get(k) else "not set")
+                   for k, label in (("picks_channel", "Picks"), ("clock_channel", "Pings"))]
+        return await interaction.followup.send("\n".join(current))
+    await interaction.followup.send("\n".join(lines + warn))
+
+
 # ------------------------------------------------------------------ GMs
 @tree.command(description="[Commish] Assign a Discord user as GM of a team")
 @app_commands.autocomplete(team=team_autocomplete)
@@ -420,6 +450,7 @@ async def on_ready():
     global sheet
     if sheet is None:
         sheet = await run(lambda: DraftSheet(open_spreadsheet()))
+        settings.update(await run(sheet.settings))
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             tree.copy_global_to(guild=guild)

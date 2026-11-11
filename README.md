@@ -15,9 +15,10 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 | `/teampicks team` | Anyone | All picks a team holds or has made |
 | `/gms` | Anyone | Teams and their GMs |
 | `/assign team user` | Commish | Makes a user the GM of a team (repeat for users with several teams) |
+| `/setchannels [picks] [pings]` | Commish | Chooses the picks channel and the ping channel (run with no options to see the current ones) |
 | `/undo` | Commish | Clears the most recent pick |
 
-Set `PICKS_CHANNEL_ID` to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.
+Run `/setchannels picks:#picks pings:#the-board` once per draft to choose the channels; the choice is saved in the sheet's `Settings` tab. (`PICKS_CHANNEL_ID` / `CLOCK_CHANNEL_ID` in Railway still work as a fallback.) Set a picks channel to post every pick, accepted trade and ping in one channel (right-click the channel → **Copy Channel ID**). GMs can then run commands anywhere; they get a private confirmation and the announcement goes to the draft channel. Leave it blank to announce wherever the command was used.
 
 Each pick is posted as one line, `72. <emoji> New Orleans Saints - P.J. Williams | OT | SMU`, followed by a ping for whoever is up next. The ping is just their @mention, posted in the channel set by `CLOCK_CHANNEL_ID` (falls back to the picks channel). `/onclock` re-sends the ping and shows you the full pick details privately. The emoji is a server emoji named after the team: its nickname (`saints`), full name (`neworleanssaints`) or abbreviation (`no`). If the server has none, the line has no emoji.
 
@@ -35,7 +36,7 @@ One tab (default name `Draft`) with one row per pick, in draft order:
 - Pick numbers must be overall numbers (1–257), not per-round. Rows without a number, like "Round 2" headers, are ignored.
 - Any number of teams or rounds works: the bot just follows the rows.
 - Different tab name or columns? Set `DRAFT_TAB`, `FIRST_PICK_ROW`, `COL_*` (see `.env.example`).
-- The bot adds two tabs: `GMs` (team → Discord user) and `Trades` (log).
+- The bot adds three tabs: `GMs` (team → Discord user), `Trades` (log) and `Settings` (channels).
 - You can fill the `GMs` tab by hand instead of using `/assign`: team name in column A (spelled as in the draft tab), and in column B either the person's Discord user ID or their Discord username/server nickname (`kebo`, `@kebo`). Exact usernames win over nicknames. `/gms` shows who each name resolved to and flags any it can't find.
 - Traded picks get the new team in column B and a note like `[from CAR via NYJ]` in column F.
 

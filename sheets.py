@@ -43,6 +43,7 @@ class Layout:
         self.draft_tab = env.get("DRAFT_TAB", "Draft")
         self.gm_tab = env.get("GM_TAB", "GMs")
         self.trade_tab = env.get("TRADE_TAB", "Trades")
+        self.settings_tab = env.get("SETTINGS_TAB", "Settings")
         self.first_row = int(env.get("FIRST_PICK_ROW", "2"))
         self.pick = env.get("COL_PICK", "A")
         self.team = env.get("COL_TEAM", "B")
@@ -65,6 +66,7 @@ class DraftSheet:
         self.gm_ws = self._get_or_create(self.l.gm_tab, ["Team", "Discord User ID", "Discord Name"])
         self.trade_ws = self._get_or_create(
             self.l.trade_tab, ["Time (UTC)", "Team A", "Team B", "A sends picks", "B sends picks", "Other terms"])
+        self.settings_ws = self._get_or_create(self.l.settings_tab, ["Setting", "Value"])
         self._cache = (0.0, [])
 
     def _get_or_create(self, title, headers):
@@ -108,6 +110,17 @@ class DraftSheet:
         for team in self.gms():
             seen.setdefault(team.lower(), team)
         return sorted(seen.values())
+
+    def settings(self) -> dict[str, str]:
+        return {r[0].strip(): r[1].strip() for r in self.settings_ws.get_all_values()[1:]
+                if len(r) >= 2 and r[0].strip()}
+
+    def set_setting(self, key: str, value: str):
+        for r, row in enumerate(self.settings_ws.get_all_values(), start=1):
+            if r > 1 and row and row[0].strip() == key:
+                self.settings_ws.batch_update([{"range": f"B{r}", "values": [[value]]}], value_input_option="RAW")
+                return
+        self.settings_ws.append_row([key, value], value_input_option="RAW")
 
     def gm_entries(self) -> dict[str, str]:
         """team name -> whatever is in column B: a Discord user ID or a username/nickname"""
