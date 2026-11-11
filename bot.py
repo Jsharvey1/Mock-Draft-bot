@@ -354,17 +354,48 @@ def validate_trade(picks, team_a, team_b, nums_a, nums_b):
     return result
 
 
-def trade_summary(team_a, team_b, nums_a, nums_b, other):
-    fmt = lambda nums: ", ".join(f"#{n}" for n in nums) or "—"
-    text = f"**{team_a}** send: {fmt(nums_a)}\n**{team_b}** send: {fmt(nums_b)}"
-    return text + (f"\nOther terms: {other}" if other else "")
+def _and(items: list[str]) -> str:
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _assets(nums: list[int], extra: str) -> str:
+    """[18, 86] + 'OT Joe Alt, 2028 5th' -> 'picks 18 and 86, OT Joe Alt and 2028 5th'"""
+    items = []
+    if nums:
+        items.append(("pick " if len(nums) == 1 else "picks ") + _and([str(n) for n in nums]))
+    items += [x.strip() for x in re.split(r",|\band\b|&", extra or "") if x.strip()]
+    return _and(items)
+
+
+def team_label(guild, team: str) -> str:
+    emoji = team_emoji(guild, team)
+    return f"{emoji} {team}" if emoji else team
+
+
+def trade_summary(team_a, team_b, nums_a, nums_b, extra_a="", extra_b=""):
+    fmt = lambda nums, extra: _assets(nums, extra) or "nothing"
+    return f"**{team_a}** send: {fmt(nums_a, extra_a)}\n**{team_b}** send: {fmt(nums_b, extra_b)}"
+
+
+def trade_announcement(guild, team_a, team_b, nums_a, nums_b, extra_a="", extra_b=""):
+    """e.g. 'The 🏈 Cleveland Browns send pick 18 and a 2027 4th to the 🏈 New York Giants for picks 22 and 86.'"""
+    a, b = team_label(guild, team_a), team_label(guild, team_b)
+    give, get = _assets(nums_a, extra_a), _assets(nums_b, extra_b)
+    if give and get:
+        return f"🔁 The {a} send {give} to the {b} for {get}."
+    if give:
+        return f"🔁 The {a} send {give} to the {b}."
+    return f"🔁 The {a} acquire {get} from the {b}."
 
 
 class TradeView(discord.ui.View):
-    def __init__(self, proposer_id, team_a, team_b, nums_a, nums_b, other):
+    def __init__(self, proposer_id, team_a, team_b, nums_a, nums_b, extra_a, extra_b):
         super().__init__(timeout=24 * 3600)
         self.proposer_id, self.team_a, self.team_b = proposer_id, team_a, team_b
-        self.nums_a, self.nums_b, self.other = nums_a, nums_b, other
+        self.nums_a, self.nums_b, self.extra_a, self.extra_b = nums_a, nums_b, extra_a, extra_b
 
     async def _finish(self, interaction, text):
         self.stop()
@@ -383,14 +414,19 @@ class TradeView(discord.ui.View):
             except ValueError as e:
                 return await self._finish(interaction, f"❌ Trade void — {e}")
             before = current_pick(picks)
-            await run(sheet.apply_trade, self.team_a, self.team_b, pa, pb, self.other)
+            other = "; ".join(x for x in (f"{self.team_a} send: {self.extra_a}" if self.extra_a else "",
+                                         f"{self.team_b} send: {self.extra_b}" if self.extra_b else "") if x)
+            await run(sheet.apply_trade, self.team_a, self.team_b, pa, pb, other)
             picks = await run(sheet.picks)
-        text = "🔁 **TRADE**\n" + trade_summary(self.team_a, self.team_b, self.nums_a, self.nums_b, self.other)
+        text = trade_announcement(interaction.guild, self.team_a, self.team_b,
+                                  self.nums_a, self.nums_b, self.extra_a, self.extra_b)
         after = current_pick(picks)
-        await self._finish(interaction, text)
         picks_ch = await picks_channel(interaction.channel)
         if picks_ch.id != interaction.channel_id:
+            await self._finish(interaction, "✅ Trade accepted — " + text.removeprefix("🔁 "))
             await picks_ch.send(text)
+        else:
+            await self._finish(interaction, text)
         if before and after and before.team != after.team:   # the pick on the clock changed hands
             await ping_next(interaction.channel, picks, gms)
 
@@ -407,21 +443,24 @@ class TradeView(discord.ui.View):
 @tree.command(description="Propose a trade — the other GM must accept it")
 @app_commands.describe(
     your_team="The team you're trading as", other_team="The team you're trading with",
-    you_send="Overall pick numbers you give up, e.g. 12, 45", you_get="Overall pick numbers you receive",
-    other="Anything else in the deal (players, future picks) — logged, not tracked")
+    you_send="Pick numbers you give up this draft, e.g. 18, 86",
+    you_get="Pick numbers you receive this draft, e.g. 22",
+    you_send_other="Players/future picks you give up, e.g. OT Joe Alt, 2028 5th",
+    you_get_other="Players/future picks you receive, e.g. WR Jordyn Tyson")
 @app_commands.autocomplete(your_team=team_autocomplete, other_team=team_autocomplete)
 async def trade(interaction: discord.Interaction, your_team: str, other_team: str,
-                you_send: str = "", you_get: str = "", other: str = ""):
+                you_send: str = "", you_get: str = "", you_send_other: str = "", you_get_other: str = ""):
     await interaction.response.defer()
     picks, gms = await run(sheet.picks), await load_gms(interaction.guild)
     team_a, team_b = match_team(your_team, picks, gms), match_team(other_team, picks, gms)
     nums_a, nums_b = parse_pick_numbers(you_send), parse_pick_numbers(you_get)
+    extra_a, extra_b = you_send_other.strip(), you_get_other.strip()
     try:
         if not team_a or not team_b or team_a == team_b:
             raise ValueError("Pick two different teams from the list.")
         if interaction.user.id != sheet.gm_of(team_a, gms) and not is_admin(interaction.user):
             raise ValueError(f"You're not the GM of {team_a}.")
-        if not (nums_a or nums_b or other.strip()):
+        if not (nums_a or nums_b or extra_a or extra_b):
             raise ValueError("Nothing is being traded.")
         validate_trade(picks, team_a, team_b, nums_a, nums_b)
     except ValueError as e:
@@ -429,8 +468,8 @@ async def trade(interaction: discord.Interaction, your_team: str, other_team: st
     uid = sheet.gm_of(team_b, gms)
     ping = f"<@{uid}>" if uid else f"*(no {team_b} GM assigned — commish can accept)*"
     await interaction.followup.send(
-        f"📨 **Trade proposal** — {ping}, accept?\n" + trade_summary(team_a, team_b, nums_a, nums_b, other.strip()),
-        view=TradeView(interaction.user.id, team_a, team_b, nums_a, nums_b, other.strip()))
+        f"📨 **Trade proposal** — {ping}, accept?\n" + trade_summary(team_a, team_b, nums_a, nums_b, extra_a, extra_b),
+        view=TradeView(interaction.user.id, team_a, team_b, nums_a, nums_b, extra_a, extra_b))
 
 
 # ------------------------------------------------------------------ startup

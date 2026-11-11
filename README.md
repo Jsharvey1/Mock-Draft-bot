@@ -9,7 +9,7 @@ The sheet is the source of truth: the pick "on the clock" is the first pick row 
 | Command | Who | What it does |
 |---|---|---|
 | `/pick player position [school]` | GM on the clock | Fills in the pick, announces it, pings the next GM |
-| `/trade your_team other_team [you_send] [you_get] [other]` | Any GM | Posts a proposal with Accept/Decline buttons; on accept, the picks change teams in the sheet |
+| `/trade your_team other_team [you_send] [you_get] [you_send_other] [you_get_other]` | Any GM | Posts a proposal with Accept/Decline buttons. On accept, the picks change teams in the sheet and the picks channel gets: `The Cleveland Browns send pick 18 and a 2027 4th to the New York Giants for picks 22 and 86.` Players and future picks go in the `_other` fields (e.g. `OT Joe Alt, 2028 5th`); they're announced and logged but not tracked |
 | `/onclock` | Anyone | Re-pings the GM on the clock in the ping channel |
 | `/upcoming` | Anyone | Next 10 picks |
 | `/teampicks team` | Anyone | All picks a team holds or has made |
